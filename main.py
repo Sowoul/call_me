@@ -1,3 +1,6 @@
+import eventlet
+eventlet.monkey_patch(time=True, thread=True)
+
 from flask import Flask, render_template, redirect, url_for, request, session
 from flask_socketio import SocketIO, join_room, emit
 from flask_sqlalchemy import SQLAlchemy
@@ -69,20 +72,17 @@ def handle_call(data):
     name = session.get('name', "")
     target = data["target"]
 
-    # Emit the offer to the target user
     emit('offer', {'offer': data['offer'], 'source': name}, to=target)
 
 @socket.on('answer')
 def handle_answer(data):
     target = data["target"]
     
-    # Emit the answer back to the caller
     emit('answer', {'answer': data['answer']}, to=target)
 
 @socket.on('call_rejected')
 def handle_rejection(data):
     source = data["source"]
-    # Notify the caller that the call was rejected
     emit('call_rejected', to=source)
 
 if __name__ == '__main__':
