@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Call</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Arial', sans-serif;
+            background-color: #121212;
+            color: #E0E0E0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+
+        .container {
+            display: flex;
+            width: 80vw;
+            height: 60vh;
+            gap: 20px;
+            margin: 0 auto;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
+        }
+
+        .user {
+            flex-grow: 1;
+            background-color: #1E1E1E;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .callbox {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-top: 20px;
+        }
+
+        input[type="text"] {
+            padding: 10px;
+            border-radius: 5px 0 0 5px;
+            border: 1px solid #333;
+            background-color: #2A2A2A;
+            color: #E0E0E0;
+            font-size: 1em;
+            outline: none;
+        }
+
+        button {
+            padding: 10px 20px;
+            border-radius: 0 5px 5px 0;
+            border: 1px solid #333;
+            background-color: #6200EE;
+            color: white;
+            font-size: 1em;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #3700B3;
+        }
+
+        .modal {
+            position: fixed;
+            z-index: 10;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            display: none;
+        }
+
+        .modal-content {
+            background-color: #2A2A2A;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            width: 300px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.7);
+        }
+
+        .modal-buttons {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 20px;
+        }
+
+        .modal button {
+            padding: 10px 20px;
+            border-radius: 5px;
+            border: none;
+            font-size: 1em;
+            cursor: pointer;
+        }
+
+        .accept {
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        .reject {
+            background-color: #f44336;
+            color: white;
+        }
+
+        .accept:hover {
+            background-color: #388E3C;
+        }
+
+        .reject:hover {
+            background-color: #D32F2F;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <video class="user" id="user1" autoplay playsinline></video>
+        <video class="user" id="user2" autoplay playsinline></video>
+    </div>
+    <div class="callbox">
+        <input type="text" placeholder="Enter username" id="contact">
+        <button onclick="call(event)">Call</button>
+    </div>
+
+    <!-- The Modal -->
+    <div id="callModal" class="modal">
+        <div class="modal-content">
+            <p id="callerName"></p>
+            <div class="modal-buttons">
+                <button class="accept" onclick="acceptCall()">Accept</button>
+                <button class="reject" onclick="rejectCall()">Reject</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <script>
+        var socket = io.connect('/');
+        var rtc = new RTCPeerConnection();
+        let localStream;
+        let remoteStream;
+        let incomingOffer = null;
+        let sourceUser = null;
+
+        let init = async () => {
+            localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+            remoteStream = new MediaStream();
+            document.getElementById("user1").srcObject = localStream;
+            document.getElementById("user2").srcObject = remoteStream;
+
+            localStream.getTracks().forEach(track => rtc.addTrack(track, localStream));
+
+            rtc.ontrack = event => {
+                event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
+            };
+
+            socket.on('offer', async data => {
+                incomingOffer = data.offer;
+                sourceUser = data.source;
+                document.getElementById("callerName").textContent = `${data.source} is calling...`;
+                document.getElementById("callModal").style.display = "flex";
+            });
+
+            socket.on('answer', data => {
+                rtc.setRemoteDescription(new RTCSessionDescription(data.answer));
+            });
+
+            socket.on('call_rejected', () => {
+                alert("Call was rejected.");
+            });
+        };
+
+        init();
+
+        function call(event) {
+            event.preventDefault();
+            var target = document.getElementById("contact").value;
+            if (target) {
+                rtc.createOffer().then(offer => {
+                    rtc.setLocalDescription(offer);
+                    socket.emit('call', { offer: offer, target: target });
+                });
+            }
+        }
+
+        function acceptCall() {
+            document.getElementById("callModal").style.display = "none";
+            rtc.setRemoteDescription(new RTCSessionDescription(incomingOffer)).then(() => {
+                return rtc.createAnswer();
+            }).then(answer => {
+                rtc.setLocalDescription(answer);
+                socket.emit('answer', { answer: answer, target: sourceUser });
+            }).catch(console.error);
+        }
+
+        function rejectCall() {
+            document.getElementById("callModal").style.display = "none";
+            socket.emit('call_rejected', { source: sourceUser });
+        }
+    </script>
+</body>
+</html>

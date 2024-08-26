@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    <form method="POST">
+        <input name="name" placeholder="Enter your name">
+        <input name="password" placeholder="Enter your password" type="password">
+        <button type="submit">Log in</button>
+    </form>
+    <button onclick="signup(event)">Sign up</button>
+    <script>
+        function signup(event){
+            event.preventDefault();
+            window.location='/signup'
+        }
+    </script>
+</body>
+</html>
