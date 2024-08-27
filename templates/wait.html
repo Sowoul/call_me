@@ -18,6 +18,7 @@
         }
 
         .container {
+            position: relative;
             display: flex;
             width: 80vw;
             height: 60vh;
@@ -29,16 +30,36 @@
         }
 
         .user {
+            position: relative;
             flex-grow: 1;
             background-color: #1E1E1E;
             border-radius: 10px;
             overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         video {
             width: 100%;
             height: 100%;
             object-fit: contain;
+            background-color: black;
+        }
+
+        .fallback {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 4em;
+            font-weight: bold;
+            color: #E0E0E0;
+            background-color: #2A2A2A;
         }
 
         .callbox {
@@ -131,8 +152,14 @@
 </head>
 <body>
     <div class="container">
-        <video class="user" id="user1" autoplay playsinline></video>
-        <video class="user" id="user2" autoplay playsinline></video>
+        <div class="user" id="user1-container">
+            <video class="user" id="user1" autoplay playsinline></video>
+            <div class="fallback" id="user1-fallback">AA</div>
+        </div>
+        <div class="user" id="user2-container">
+            <video class="user" id="user2" autoplay playsinline></video>
+            <div class="fallback" id="user2-fallback">BB</div>
+        </div>
     </div>
     <div class="callbox">
         <input type="text" placeholder="Enter username" id="contact">
@@ -154,49 +181,43 @@
     <script>
         var socket = io.connect('/');
         var rtc = new RTCPeerConnection();
-        let localStream;
-        let remoteStream;
+        let localStream = null;
+        let remoteStream = new MediaStream();
         let incomingOffer = null;
         let sourceUser = null;
 
-        let init = async () => {
-            localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-            remoteStream = new MediaStream();
-            document.getElementById("user1").srcObject = localStream;
-            document.getElementById("user2").srcObject = remoteStream;
+        document.getElementById("user2").srcObject = remoteStream;
 
-            localStream.getTracks().forEach(track => rtc.addTrack(track, localStream));
-
-            rtc.ontrack = event => {
-                event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
-            };
-
-            socket.on('offer', async data => {
-                incomingOffer = data.offer;
-                sourceUser = data.source;
-                document.getElementById("callerName").textContent = `${data.source} is calling...`;
-                document.getElementById("callModal").style.display = "flex";
-            });
-
-            socket.on('answer', data => {
-                rtc.setRemoteDescription(new RTCSessionDescription(data.answer));
-            });
-
-            socket.on('call_rejected', () => {
-                alert("Call was rejected.");
-            });
+        rtc.ontrack = event => {
+            event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
         };
 
-        init();
+        socket.on('offer', async data => {
+            incomingOffer = data.offer;
+            sourceUser = data.source;
+            document.getElementById("callerName").textContent = `${data.source} is calling...`;
+            document.getElementById("callModal").style.display = "flex";
+        });
+
+        socket.on('answer', data => {
+            rtc.setRemoteDescription(new RTCSessionDescription(data.answer));
+        });
+
+        socket.on('call_rejected', () => {
+            alert("Call was rejected.");
+        });
 
         function call(event) {
             event.preventDefault();
             var target = document.getElementById("contact").value;
-            if (target) {
+            if (target && localStream) {
                 rtc.createOffer().then(offer => {
-                    rtc.setLocalDescription(offer);
-                    socket.emit('call', { offer: offer, target: target });
-                });
+                    return rtc.setLocalDescription(offer);
+                }).then(() => {
+                    socket.emit('call', { offer: rtc.localDescription, target: target });
+                }).catch(console.error);
+            } else {
+                alert("No video stream available.");
             }
         }
 
@@ -205,14 +226,67 @@
             rtc.setRemoteDescription(new RTCSessionDescription(incomingOffer)).then(() => {
                 return rtc.createAnswer();
             }).then(answer => {
-                rtc.setLocalDescription(answer);
-                socket.emit('answer', { answer: answer, target: sourceUser });
+                return rtc.setLocalDescription(answer);
+            }).then(() => {
+                socket.emit('answer', { answer: rtc.localDescription, target: sourceUser });
             }).catch(console.error);
         }
 
         function rejectCall() {
             document.getElementById("callModal").style.display = "none";
             socket.emit('call_rejected', { source: sourceUser });
+        }
+
+        async function startCamera() {
+            const newStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            updateStream(newStream, "user1");
+        }
+
+        async function startScreenShare() {
+            const newStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+            updateStream(newStream, "user1");
+        }
+
+        function stopStream() {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                rtc.getSenders().forEach(sender => rtc.removeTrack(sender));
+                document.getElementById("user1").srcObject = null;
+                document.getElementById("user1-fallback").style.display = "flex";
+                localStream = null;
+            }
+        }
+
+        function updateStream(newStream, userId) {
+            const videoElement = document.getElementById(userId);
+            const fallbackElement = document.getElementById(`${userId}-fallback`);
+
+            // Stop the previous stream if it exists
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
+
+            const videoTrack = newStream.getVideoTracks()[0];
+            const audioTrack = newStream.getAudioTracks()[0];
+
+            const videoSender = rtc.getSenders().find(s => s.track && s.track.kind === 'video');
+            const audioSender = rtc.getSenders().find(s => s.track && s.track.kind === 'audio');
+
+            if (videoSender) {
+                videoSender.replaceTrack(videoTrack);
+            } else {
+                rtc.addTrack(videoTrack, newStream);
+            }
+
+            if (audioSender) {
+                audioSender.replaceTrack(audioTrack);
+            } else {
+                rtc.addTrack(audioTrack, newStream);
+            }
+
+            localStream = newStream;
+            videoElement.srcObject = localStream;
+            fallbackElement.style.display = "none";
         }
     </script>
 </body>
